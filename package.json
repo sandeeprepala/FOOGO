@@ -1,0 +1,18 @@
+{
+  "name": "foogo-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start:all": "concurrently \"npm --prefix backend/userService start\" \"npm --prefix backend/api-gateway start\" \"npm --prefix backend/restService start\" \"npm --prefix backend/cartService start\" \"npm --prefix backend/orderService start\" \"npm --prefix backend/paymentService start\" \"npm --prefix backend/restOrderService start\" \"npm --prefix backend/delAgentMatchingService start\" \"npm --prefix backend/locationUpdateService start\" \"npm --prefix backend/delService start\" \"npm --prefix backend/notificationService start\" \"npm --prefix backend/rag-chatbot start\"",
+    "start:all:with-chatbot": "concurrently \"npm --prefix backend/userService start\" \"npm --prefix backend/api-gateway start\" \"npm --prefix backend/restService start\" \"npm --prefix backend/cartService start\" \"npm --prefix backend/orderService start\" \"npm --prefix backend/paymentService start\" \"npm --prefix backend/restOrderService start\" \"npm --prefix backend/delAgentMatchingService start\" \"npm --prefix backend/locationUpdateService start\" \"npm --prefix backend/delService start\" \"npm --prefix backend/notificationService start\" \"npm --prefix backend/rag-chatbot start\"",
+    "start:docker": "docker-compose up --build",
+    "install-all": "npm install && (cd backend/userService && npm install) && (cd backend/api-gateway && npm install) && (cd backend/restService && npm install) && (cd backend/rag-chatbot && npm install)",
+    "rag:start": "npm --prefix backend/rag-chatbot start",
+    "rag:dev": "npm --prefix backend/rag-chatbot dev",
+    "rag:index": "npm --prefix backend/rag-chatbot run rag:index",
+    "rag:install": "npm --prefix backend/rag-chatbot install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}

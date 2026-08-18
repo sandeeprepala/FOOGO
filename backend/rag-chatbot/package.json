@@ -1,0 +1,23 @@
+{
+  "name": "rag-chatbot",
+  "version": "1.0.0",
+  "description": "RAG-based food and restaurant chatbot using Supabase pgvector and Gemini LLM",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development nodemon server.js",
+    "rag:index": "node scripts/index-documents.js"
+  },
+  "keywords": ["rag", "chatbot", "food-delivery", "vector-search"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.0",
+    "@xenova/transformers": "^2.17.2",
+    "express": "^4.18.2",
+    "dotenv": "^16.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

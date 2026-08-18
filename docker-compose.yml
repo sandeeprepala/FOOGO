@@ -1,0 +1,279 @@
+version: '3.8'
+
+services:
+  # Zookeeper - Kafka dependency for coordination
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - food-delivery-network
+
+  # Kafka Broker - Event message broker
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_MS: 86400000  # 24 hours
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    networks:
+      - food-delivery-network
+    healthcheck:
+      test: kafka-broker-api-versions --bootstrap-server kafka:9092
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Kafka UI for debugging (access at http://localhost:8080)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports:
+      - "8080:8080"
+    networks:
+      - food-delivery-network
+
+  # ============================================================================
+  # MICROSERVICES (each runs in its own container with its own port)
+  # ============================================================================
+
+  # User Service - Authentication
+  user-service:
+    build:
+      context: ./backend/userService
+      dockerfile: Dockerfile
+    container_name: user-service
+    ports:
+      - "3010:3010"
+    environment:
+      PORT: 3010
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      NODE_ENV: production
+    depends_on:
+      - kafka
+    networks:
+      - food-delivery-network
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    ports:
+      - "3001:3001"
+    environment:
+      CUSTOMER_GATEWAY_PORT: 3001
+      USER_SERVICE_URL: http://user-service:3010
+      RESTAURANT_SERVICE_URL: http://restaurant-service:3011
+      CART_SERVICE_URL: http://cart-service:3012
+      ORDER_SERVICE_URL: http://order-service:3013
+      PAYMENT_SERVICE_URL: http://payment-service:3014
+      REST_ORDER_SERVICE_URL: http://rest-order-service:3015
+      DELIVERY_AGENT_MATCHING_URL: http://del-agent-matching-service:3016
+      LOCATION_UPDATE_SERVICE_URL: http://location-update-service:3017
+      DELIVERY_SERVICE_URL: http://delivery-service:3018
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: ${REDIS_URL}
+      NODE_ENV: production
+    depends_on:
+      - user-service
+    networks:
+      - food-delivery-network
+
+  # Restaurant Service
+  restaurant-service:
+    build:
+      context: ./backend/restService
+      dockerfile: Dockerfile
+    container_name: restaurant-service
+    ports:
+      - "3011:3011"
+    environment:
+      PORT: 3011
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      KAFKA_BROKER: kafka:9092
+      NODE_ENV: production
+    depends_on:
+      - kafka
+    networks:
+      - food-delivery-network
+
+  # Cart Service
+  cart-service:
+    build:
+      context: ./backend/cartService
+      dockerfile: Dockerfile
+    container_name: cart-service
+    ports:
+      - "3012:3012"
+    environment:
+      PORT: 3012
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      KAFKA_BROKER: kafka:9092
+      NODE_ENV: production
+    depends_on:
+      - kafka
+    networks:
+      - food-delivery-network
+
+  # Order Service
+  order-service:
+    build:
+      context: ./backend/orderService
+      dockerfile: Dockerfile
+    container_name: order-service
+    ports:
+      - "3013:3013"
+    environment:
+      PORT: 3013
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      KAFKA_BROKER: kafka:9092
+      REDIS_URL: ${REDIS_URL}
+      NODE_ENV: production
+    depends_on:
+      - kafka
+    networks:
+      - food-delivery-network
+
+  # Payment Service
+  payment-service:
+    build:
+      context: ./backend/paymentService
+      dockerfile: Dockerfile
+    container_name: payment-service
+    ports:
+      - "3014:3014"
+    environment:
+      PORT: 3014
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      KAFKA_BROKER: kafka:9092
+      NODE_ENV: production
+    depends_on:
+      - kafka
+    networks:
+      - food-delivery-network
+
+  # Rest Order Service
+  rest-order-service:
+    build:
+      context: ./backend/restOrderService
+      dockerfile: Dockerfile
+    container_name: rest-order-service
+    ports:
+      - "3015:3015"
+    environment:
+      PORT: 3015
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      KAFKA_BROKER: kafka:9092
+      NODE_ENV: production
+    depends_on:
+      - kafka
+    networks:
+      - food-delivery-network
+
+  # Delivery Agent Matching Service
+  del-agent-matching-service:
+    build:
+      context: ./backend/delAgentMatchingService
+      dockerfile: Dockerfile
+    container_name: del-agent-matching-service
+    ports:
+      - "3016:3016"
+    environment:
+      PORT: 3016
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      KAFKA_BROKER: kafka:9092
+      REDIS_URL: ${REDIS_URL}
+      NODE_ENV: production
+    depends_on:
+      - kafka
+    networks:
+      - food-delivery-network
+
+  # Location Update Service
+  location-update-service:
+    build:
+      context: ./backend/locationUpdateService
+      dockerfile: Dockerfile
+    container_name: location-update-service
+    ports:
+      - "3017:3017"
+    environment:
+      PORT: 3017
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      KAFKA_BROKER: kafka:9092
+      REDIS_URL: ${REDIS_URL}
+      NODE_ENV: production
+    depends_on:
+      - kafka
+    networks:
+      - food-delivery-network
+
+  # Delivery Service
+  delivery-service:
+    build:
+      context: ./backend/delService
+      dockerfile: Dockerfile
+    container_name: delivery-service
+    ports:
+      - "3018:3018"
+    environment:
+      PORT: 3018
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      NODE_ENV: production
+    networks:
+      - food-delivery-network
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./backend/notificationService
+      dockerfile: Dockerfile
+    container_name: notification-service
+    ports:
+      - "3019:3019"
+    environment:
+      PORT: 3019
+      KAFKA_BROKER: kafka:9092
+      NODE_ENV: production
+    depends_on:
+      - kafka
+    networks:
+      - food-delivery-network
+
+networks:
+  food-delivery-network:
+    driver: bridge
