@@ -6,12 +6,9 @@ A real-time food delivery platform (Swiggy/Zomato-like) built with **true micros
 
 ## 🎬 Demo Video
 
-https://github.com/user-attachments/assets/foogo-demo-video
+[![FOOGO Demo Video](https://img.youtube.com/vi/9FN13tOxp8Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=9FN13tOxp8Y)
 
-> ▶️ Watch the full walkthrough of FOOGO — customer ordering, real-time tracking, restaurant dashboard, delivery agent flow, and the AI chatbot.
-
-<!-- Local reference (works when repo is cloned): -->
-<!-- ![FOOGO Demo](public/foogo%20demo%20video.mp4) -->
+> ▶️ Click the thumbnail above to watch the full walkthrough — customer ordering, real-time tracking, restaurant dashboard, delivery agent flow, and the AI chatbot.
 
 ---
 
