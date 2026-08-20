@@ -14,12 +14,22 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const ragRoutes = require('./routes/rag');
 
-const PORT = process.env.PORT || 3015;
+const PORT = process.env.PORT || 3020;
 const app = express();
 
 // ============================================================================
 // MIDDLEWARE
 // ============================================================================
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json());
 
 // ============================================================================

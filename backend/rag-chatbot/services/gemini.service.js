@@ -6,7 +6,8 @@
 // ============================================================================
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const FALLBACK_MODEL = 'gemini-1.5-flash';
 
 if (!GEMINI_API_KEY) {
   throw new Error('Missing GEMINI_API_KEY in .env');
@@ -36,6 +37,45 @@ Response format:
 - Always reference the restaurant name and food item name when discussing specifics`;
 
 /**
+ * Call Gemini API with retry logic and fallback model.
+ * Retries on 503 (overloaded) with exponential backoff.
+ * Falls back to gemini-1.5-flash on the last attempt.
+ */
+async function callGeminiWithRetry(model, body, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    // On the last attempt, fall back to a more stable model
+    const targetModel = attempt >= retries ? FALLBACK_MODEL : model;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (response.ok) {
+      if (targetModel !== model) {
+        console.log(`✅ Gemini responded using fallback model: ${targetModel}`);
+      }
+      return response;
+    }
+
+    const errorData = await response.json();
+
+    // Retry on 503 (overloaded) with exponential backoff
+    if (response.status === 503 && attempt < retries) {
+      const wait = attempt * 1500;
+      console.warn(`⚠️ Gemini 503 on ${targetModel} (attempt ${attempt}/${retries}), retrying in ${wait}ms...`);
+      await new Promise(r => setTimeout(r, wait));
+      continue;
+    }
+
+    // Throw on non-retryable errors
+    throw new Error(`Gemini API error (${response.status}): ${JSON.stringify(errorData)}`);
+  }
+}
+
+/**
  * Generate a response using Google Gemini API
  *
  * @param {string} userQuery - The user's original question
@@ -55,7 +95,7 @@ async function generateResponse(userQuery, retrievedDocuments) {
         'Retrieved Context:\n\n' +
         retrievedDocuments
           .map((doc, index) => {
-            const { source_type, content, metadata, similarity } = doc;
+            const { source_type, content, similarity } = doc;
             return (
               `${index + 1}. [${source_type.toUpperCase()}] (Relevance: ${(similarity * 100).toFixed(1)}%)\n` +
               `${content}\n`
@@ -77,58 +117,25 @@ User Query: "${userQuery}"
 
 Generate a helpful, natural response:`;
 
-    // Call Google Gemini API
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    // Call Google Gemini API with retry + fallback logic
+    const response = await callGeminiWithRetry(
+      GEMINI_MODEL,
       {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+        contents: [{ parts: [{ text: fullPrompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 512,
         },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: fullPrompt,
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 512,
-          },
-          safetySettings: [
-            {
-              category: 'HARM_CATEGORY_HARASSMENT',
-              threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-            },
-            {
-              category: 'HARM_CATEGORY_HATE_SPEECH',
-              threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-            },
-            {
-              category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-              threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-            },
-            {
-              category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-              threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-            },
-          ],
-        }),
+        safetySettings: [
+          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+        ],
       }
     );
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(
-        `Gemini API error (${response.status}): ${JSON.stringify(errorData)}`
-      );
-    }
 
     const result = await response.json();
 

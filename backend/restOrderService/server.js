@@ -129,24 +129,40 @@ app.get('/health', (req, res) => {
 // RESTAURANT ORDERS ENDPOINTS
 // ============================================================================
 
-// GET incoming orders for restaurant
+// GET incoming orders for restaurant — split by actionable status
 app.get('/restaurant/:restaurantId/orders', async (req, res) => {
   try {
     const { restaurantId } = req.params;
 
-    // Include recent statuses so restaurants can see incoming orders
-    const { data: orders, error } = await supabase
+    // 'placed' = payment done, waiting for restaurant to accept/reject
+    const { data: incoming, error: inError } = await supabase
       .from('orders')
       .select('id, customer_id, status, total_amount, delivery_address, created_at')
       .eq('restaurant_id', restaurantId)
-      .in('status', ['pending_payment', 'placed', 'accepted_by_restaurant'])
+      .eq('status', 'placed')
       .order('created_at', { ascending: false });
 
-    if (error) {
-      return res.status(400).json({ success: false, message: error.message });
+    if (inError) {
+      return res.status(400).json({ success: false, message: inError.message });
     }
 
-    res.status(200).json({ success: true, orders: orders || [] });
+    // 'accepted_by_restaurant' = already accepted, being prepared
+    const { data: active, error: actError } = await supabase
+      .from('orders')
+      .select('id, customer_id, status, total_amount, delivery_address, created_at')
+      .eq('restaurant_id', restaurantId)
+      .eq('status', 'accepted_by_restaurant')
+      .order('created_at', { ascending: false });
+
+    if (actError) {
+      return res.status(400).json({ success: false, message: actError.message });
+    }
+
+    res.status(200).json({
+      success: true,
+      orders: incoming || [],          // needs accept/reject action
+      active_orders: active || [],     // already accepted, in progress
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Error fetching orders', error: error.message });
   }

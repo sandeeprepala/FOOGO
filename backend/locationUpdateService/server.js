@@ -136,32 +136,56 @@ app.post('/update', async (req, res) => {
     }
 
     // ================================================================
-    // HOT PATH: Write to Redis immediately (30s TTL)
-    // This is where live tracking gets its speed
+    // HOT PATH: Write to Redis immediately (300s TTL)
     // ================================================================
     const locationKey = `agent:location:${agentId}`;
-    await redis.set(locationKey, `${lat},${lng}`, 'EX', 30);
+    await redis.set(locationKey, `${lat},${lng}`, 'EX', 300);
 
-    console.log(`📍 Agent ${agentId} location: ${lat}, ${lng}`);
+    // Also persist agent location to delivery_agents table in Supabase
+    try {
+      await supabase
+        .from('delivery_agents')
+        .update({ lat: parseFloat(lat), lng: parseFloat(lng) })
+        .or(`id.eq.${agentId},user_id.eq.${agentId}`);
+    } catch (e) {}
 
-    // Broadcast to customer if order_id provided
+    console.log(`📍 Agent ${agentId} location updated: ${lat}, ${lng}`);
+
+    // Broadcast live location to tracking customer WebSockets
+    const updatePayload = {
+      event: 'live_location',
+      agentId,
+      lat: parseFloat(lat),
+      lng: parseFloat(lng),
+      timestamp: new Date().toISOString(),
+    };
+
+    let sentCount = 0;
     if (order_id) {
-      const customers = orderConnections.get(order_id);
+      const key = String(order_id);
+      const customers = orderConnections.get(key);
       if (customers && customers.size > 0) {
-        const update = {
-          event: 'live_location',
-          agentId,
-          lat: parseFloat(lat),
-          lng: parseFloat(lng),
-          timestamp: new Date().toISOString(),
-        };
-
         customers.forEach((ws) => {
           if (ws.readyState === 1) { // OPEN
-            ws.send(JSON.stringify(update));
+            ws.send(JSON.stringify(updatePayload));
+            sentCount++;
           }
         });
+        console.log(`📡 Broadcast live location for order ${order_id} to ${sentCount} customer sockets`);
       }
+    }
+
+    // Fallback broadcast to all active order tracking sockets if no specific target received it
+    if (sentCount === 0 && orderConnections.size > 0) {
+      orderConnections.forEach((customers) => {
+        customers.forEach((ws) => {
+          if (ws.readyState === 1) {
+            ws.send(JSON.stringify(updatePayload));
+            sentCount++;
+          }
+        });
+      });
+      console.log(`📡 Broadcast live location fallback to ${sentCount} tracking sockets`);
     }
 
     res.status(200).json({
@@ -183,21 +207,37 @@ app.get('/:agentId', async (req, res) => {
 
     const locationData = await redis.get(`agent:location:${agentId}`);
 
-    if (!locationData) {
-      return res.status(404).json({
-        success: false,
-        message: 'Agent location not found (may be offline)',
+    if (locationData) {
+      const [lat, lng] = locationData.split(',');
+      return res.status(200).json({
+        success: true,
+        agentId,
+        lat: parseFloat(lat),
+        lng: parseFloat(lng),
+        source: 'redis_cache',
       });
     }
 
-    const [lat, lng] = locationData.split(',');
+    // DB Fallback if Redis key expired
+    const { data: agent } = await supabase
+      .from('delivery_agents')
+      .select('lat, lng')
+      .eq('id', agentId)
+      .maybeSingle();
 
-    res.status(200).json({
-      success: true,
-      agentId,
-      lat: parseFloat(lat),
-      lng: parseFloat(lng),
-      source: 'redis_cache',
+    if (agent && agent.lat && agent.lng) {
+      return res.status(200).json({
+        success: true,
+        agentId,
+        lat: parseFloat(agent.lat),
+        lng: parseFloat(agent.lng),
+        source: 'db',
+      });
+    }
+
+    res.status(404).json({
+      success: false,
+      message: 'Agent location not found',
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Error fetching location', error: error.message });

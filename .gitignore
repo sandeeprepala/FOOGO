@@ -47,3 +47,10 @@ __pycache__/
 # Misc
 *.swp
 *.swo
+
+# Large media files (exceeds GitHub 100MB limit - host separately)
+*.mp4
+*.mov
+*.avi
+*.mkv
+public/foogo demo video.mp4

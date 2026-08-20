@@ -2,6 +2,27 @@
 
 A real-time food delivery platform (Swiggy/Zomato-like) built with **true microservices architecture**. Each service is independently runnable, deployable, and testable.
 
+---
+
+## 🎬 Demo Video
+
+https://github.com/user-attachments/assets/foogo-demo-video
+
+> ▶️ Watch the full walkthrough of FOOGO — customer ordering, real-time tracking, restaurant dashboard, delivery agent flow, and the AI chatbot.
+
+<!-- Local reference (works when repo is cloned): -->
+<!-- ![FOOGO Demo](public/foogo%20demo%20video.mp4) -->
+
+---
+
+## 🏗️ Architecture Diagram
+
+![FOOGO System Architecture](public/Final%20architecture.jpeg)
+
+> End-to-end microservices architecture: API Gateways → Kafka event bus → 11 independent services → Supabase PostgreSQL + Upstash Redis + WebSockets.
+
+---
+
 ## 📋 System Overview
 
 ### Architecture

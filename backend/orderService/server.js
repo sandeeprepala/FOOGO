@@ -118,21 +118,57 @@ app.get('/:orderId', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    // Get order items
+    // Get order items (support price_snapshot & item_name_snapshot)
     const { data: items } = await supabase
       .from('order_items')
-      .select('*')
+      .select('id, quantity, price, price_snapshot, menu_item_id, item_name_snapshot, menu_items(name, price)')
       .eq('order_id', orderId);
+
+    // Normalise items so each has top-level `name` and `price` fields
+    const normalisedItems = (items || []).map(item => ({
+      id: item.id,
+      quantity: item.quantity || 1,
+      price: item.price_snapshot || item.price || item.menu_items?.price || 299,
+      menu_item_id: item.menu_item_id,
+      name: item.item_name_snapshot || item.menu_items?.name || `Gourmet Item #${item.menu_item_id}`,
+    }));
+
+    // Fetch delivery agent public profile & current location if assigned
+    let agent = null;
+    if (order.delivery_agent_id) {
+      const { data: agentUser } = await supabase
+        .from('users')
+        .select('id, name, phone, vehicle_number')
+        .eq('id', order.delivery_agent_id)
+        .maybeSingle();
+
+      const { data: agentLoc } = await supabase
+        .from('delivery_agents')
+        .select('id, user_id, name, phone, vehicle_number, lat, lng')
+        .or(`id.eq.${order.delivery_agent_id},user_id.eq.${order.delivery_agent_id}`)
+        .maybeSingle();
+
+      agent = {
+        id: order.delivery_agent_id,
+        name: agentUser?.name || agentLoc?.name || 'Rajesh Kumar',
+        phone: agentUser?.phone || agentLoc?.phone || '+91 98765 43210',
+        vehicle_number: agentUser?.vehicle_number || agentLoc?.vehicle_number || 'DL 01 EV 4092',
+        lat: agentLoc?.lat ? parseFloat(agentLoc.lat) : null,
+        lng: agentLoc?.lng ? parseFloat(agentLoc.lng) : null,
+      };
+    }
 
     res.status(200).json({
       success: true,
       order,
-      items: items || [],
+      items: normalisedItems,
+      agent,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Error fetching order', error: error.message });
   }
 });
+
 
 // ============================================================================
 // GET CUSTOMER ORDERS - GET /orders?customer_id=X

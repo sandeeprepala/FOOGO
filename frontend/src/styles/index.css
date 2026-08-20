@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg-pale-sage: #E8F0D8;
+  --color-surface-ivory: #FBF8EA;
+  --color-card-sage: #F1F4DF;
+  --color-primary-olive: #789C45;
+  --color-forest-green: #23452D;
+  --color-text-charcoal: #242A24;
+  --color-muted-sage-gray: #687064;
+  --color-border-light: #DDE4C9;
+  --color-white: #FFFFFF;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #E8F0D8;
+}
+::-webkit-scrollbar-thumb {
+  background: #DDE4C9;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #789C45;
+}
+
+/* Smooth Scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Leaflet Map Customizations */
+.leaflet-container {
+  font-family: inherit;
+  border-radius: 1.25rem;
+  z-index: 10;
+}
+
+.custom-leaflet-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-shadow: 0 4px 12px rgba(35, 69, 45, 0.25);
+  transition: all 0.3s ease;
+}
+
+/* Shimmer Loading Skeleton */
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    #F1F4DF 0%,
+    #EAF0D8 50%,
+    #F1F4DF 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite ease-in-out;
+}

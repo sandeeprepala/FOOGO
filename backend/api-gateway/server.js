@@ -11,7 +11,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const Redis = require('ioredis');
 const cors = require('cors');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 
 const PORT = process.env.CUSTOMER_GATEWAY_PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -90,13 +90,7 @@ app.use(
     changeOrigin: true,
     pathRewrite: { '^/auth': '/auth' },
     onProxyReq: (proxyReq, req, res) => {
-      // If body was parsed by express.json(), forward it to the target service
-      if (req.body && Object.keys(req.body).length) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      fixRequestBody(proxyReq, req);
     },
     onError: (err, req, res) => {
       console.error('Proxy error:', err.message);
@@ -120,19 +114,7 @@ app.use(
     // service registers routes at the root (e.g. GET /nearby).
     pathRewrite: { '^/restaurants': '' },
     onProxyReq: (proxyReq, req, res) => {
-      // Log proxied path for debugging
-      try {
-        console.log('[gateway] proxying to restaurant service path:', proxyReq.path || proxyReq.pathName || proxyReq.getHeader('path'));
-      } catch (e) {
-        console.log('[gateway] proxying to restaurant service (path unavailable)');
-      }
-      // Forward parsed JSON bodies if present
-      if (req.body && Object.keys(req.body).length) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      fixRequestBody(proxyReq, req);
     },
     onError: (err, req, res) => {
       console.error('Proxy error:', err.message);
@@ -157,19 +139,7 @@ app.use(
     // Strip the `/cart` prefix because cartService registers routes at root
     pathRewrite: { '^/cart': '' },
     onProxyReq: (proxyReq, req, res) => {
-      // Log proxied path for debugging
-      try {
-        console.log('[gateway] proxying to cart service path:', proxyReq.path || proxyReq.pathName || proxyReq.getHeader('path'));
-      } catch (e) {
-        console.log('[gateway] proxying to cart service (path unavailable)');
-      }
-      // Forward parsed JSON bodies if present (express.json() consumed the stream)
-      if (req.body && Object.keys(req.body).length) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      fixRequestBody(proxyReq, req);
     },
     onError: (err, req, res) => {
       console.error('Proxy error:', err.message);
@@ -188,28 +158,12 @@ app.use(
     // Strip the `/orders` prefix because orderService registers routes at root
     pathRewrite: { '^/orders': '' },
     onProxyReq: (proxyReq, req, res) => {
-      // Log proxied path for debugging
-      try {
-        console.log('[gateway] proxying to order service path:', proxyReq.path || proxyReq.getHeader('path'));
-      } catch (e) {
-        console.log('[gateway] proxying to order service (path unavailable)');
-      }
-      // Forward parsed JSON bodies if present
-      if (req.body && Object.keys(req.body).length) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
-      // Forward authenticated user info to downstream services
+      // Forward authenticated user info BEFORE writing body (headers must precede body)
       if (req.user) {
-        try {
-          proxyReq.setHeader('x-user-id', String(req.user.id));
-          proxyReq.setHeader('x-user-role', String(req.user.role));
-        } catch (e) {
-          /* ignore header set errors */
-        }
+        proxyReq.setHeader('x-user-id', String(req.user.id));
+        proxyReq.setHeader('x-user-role', String(req.user.role));
       }
+      fixRequestBody(proxyReq, req);
     },
     onError: (err, req, res) => {
       console.error('Proxy error:', err.message);
@@ -231,7 +185,14 @@ app.use(
   createProxyMiddleware({
     target: process.env.LOCATION_UPDATE_SERVICE_URL,
     changeOrigin: true,
-    pathRewrite: { '^/location': '/location' },
+    pathRewrite: { '^/location': '' },
+    onProxyReq: (proxyReq, req, res) => {
+      if (req.user) {
+        proxyReq.setHeader('x-user-id', String(req.user.id));
+        proxyReq.setHeader('x-user-role', String(req.user.role));
+      }
+      fixRequestBody(proxyReq, req);
+    },
     onError: (err, req, res) => {
       console.error('Proxy error:', err.message);
       res.status(503).json({ success: false, message: 'Location service unavailable' });
@@ -252,7 +213,14 @@ app.use(
   createProxyMiddleware({
     target: process.env.DELIVERY_SERVICE_URL,
     changeOrigin: true,
-    pathRewrite: { '^/delivery': '/delivery' },
+    pathRewrite: { '^/delivery': '' },
+    onProxyReq: (proxyReq, req, res) => {
+      if (req.user) {
+        proxyReq.setHeader('x-user-id', String(req.user.id));
+        proxyReq.setHeader('x-user-role', String(req.user.role));
+      }
+      fixRequestBody(proxyReq, req);
+    },
     onError: (err, req, res) => {
       console.error('Proxy error:', err.message);
       res.status(503).json({ success: false, message: 'Delivery service unavailable' });
@@ -276,21 +244,60 @@ app.use(
     // strip prefix so /restaurant-orders/restaurant/1/orders -> /restaurant/1/orders
     pathRewrite: { '^/restaurant-orders': '' },
     onProxyReq: (proxyReq, req, res) => {
-      try {
-        console.log('[gateway] proxying to rest-order-service path:', proxyReq.path || proxyReq.getHeader('path'));
-      } catch (e) {
-        console.log('[gateway] proxying to rest-order-service (path unavailable)');
-      }
-      if (req.body && Object.keys(req.body).length) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      fixRequestBody(proxyReq, req);
     },
     onError: (err, req, res) => {
       console.error('Proxy error:', err.message);
       res.status(503).json({ success: false, message: 'Restaurant-order service unavailable' });
+    },
+  })
+);
+
+/**
+ * Verify JWT token optionally (for public/customer endpoints that accept optional auth)
+ */
+const verifyJWTOptional = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      const isBlacklisted = await redis.get(`blacklist:${token}`);
+      if (!isBlacklisted) {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
+        req.token = token;
+      }
+    }
+    next();
+  } catch (error) {
+    next();
+  }
+};
+
+// RAG Chatbot routes (customer-facing, optional JWT)
+app.use(
+  '/rag',
+  verifyJWTOptional,
+  (req, res, next) => {
+    if (req.user && req.user.role !== 'customer') {
+      return res.status(403).json({ success: false, message: 'Only customers can use RAG Chatbot' });
+    }
+    next();
+  },
+  createProxyMiddleware({
+    target: process.env.RAG_CHATBOT_URL || 'http://localhost:3020',
+    changeOrigin: true,
+    pathRewrite: { '^/rag': '' },
+    onProxyReq: (proxyReq, req, res) => {
+      if (req.user) {
+        proxyReq.setHeader('x-user-id', String(req.user.id));
+        proxyReq.setHeader('x-user-role', String(req.user.role));
+      }
+      fixRequestBody(proxyReq, req);
+    },
+    onError: (err, req, res) => {
+      console.error('Proxy error:', err.message);
+      res.status(503).json({ success: false, message: 'RAG Chatbot service unavailable' });
     },
   })
 );

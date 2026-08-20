@@ -97,6 +97,9 @@ const agentConnections = new Map();
           let agents = (agentsResult && agentsResult.data) || null;
           const error = (agentsResult && agentsResult.error) || null;
 
+          const orderLat = order.delivery_lat || 28.6139;
+          const orderLng = order.delivery_lng || 77.2090;
+
           // If RPC returned nothing, fallback to JS haversine computation
           if (!agents || agents.length === 0) {
             console.log(`RPC returned no agents for order ${orderId}, falling back to JS search`);
@@ -109,63 +112,70 @@ const agentConnections = new Map();
 
             if (fetchErr || !allAgents) {
               console.error('Failed to fetch delivery_agents for fallback:', fetchErr?.message || fetchErr);
-              return;
-            }
+            } else {
+              const toRadians = (deg) => (deg * Math.PI) / 180;
+              const haversineKm = (lat1, lon1, lat2, lon2) => {
+                const R = 6371; // Earth radius km
+                const dLat = toRadians(lat2 - lat1);
+                const dLon = toRadians(lon2 - lon1);
+                const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2;
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                return R * c;
+              };
 
-            const toRadians = (deg) => (deg * Math.PI) / 180;
-            const haversineKm = (lat1, lon1, lat2, lon2) => {
-              const R = 6371; // Earth radius km
-              const dLat = toRadians(lat2 - lat1);
-              const dLon = toRadians(lon2 - lon1);
-              const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2;
-              const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-              return R * c;
-            };
+              const radiusKm = 5;
+              agents = allAgents
+                .map((a) => ({ ...a, distance_km: haversineKm(orderLat, orderLng, a.lat || 28.6150, a.lng || 77.2150) }))
+                .filter((a) => a.distance_km <= radiusKm)
+                .sort((a, b) => a.distance_km - b.distance_km);
 
-            const radiusKm = 5;
-            agents = allAgents
-              .map((a) => ({ ...a, distance_km: haversineKm(order.delivery_lat, order.delivery_lng, a.lat, a.lng) }))
-              .filter((a) => a.distance_km <= radiusKm)
-              .sort((a, b) => a.distance_km - b.distance_km);
-
-            console.log(`Fallback found ${agents.length} agents near order ${orderId}`);
-
-            if (!agents || agents.length === 0) {
-              console.log(`No agents found near order ${orderId} after fallback`);
-              return;
+              console.log(`Fallback found ${agents ? agents.length : 0} agents near order ${orderId}`);
             }
           }
 
-          // Broadcast order to all nearby agents via WebSocket
+          // Broadcast order to nearby agents via WebSocket
           const orderBroadcast = {
             event: 'nearby_order',
             orderId: order.id,
-            restaurantName: 'Restaurant', // Fetch in real app
+            restaurantName: 'Restaurant',
             totalAmount: order.total_amount,
             deliveryAddress: order.delivery_address,
-            deliveryLat: order.delivery_lat,
-            deliveryLng: order.delivery_lng,
+            deliveryLat: orderLat,
+            deliveryLng: orderLng,
             timestamp: new Date().toISOString(),
           };
 
-          // Debug: show connected agent keys and agents found
-          try {
-            console.log('DEBUG agentConnections keys:', Array.from(agentConnections.keys()));
-            console.log('DEBUG agents array:', (agents || []).map(a => ({ id: a.id, lat: a.lat, lng: a.lng, distance_km: a.distance_km })));
-          } catch (e) {}
+          let broadcastCount = 0;
 
-          agents.forEach((agent) => {
-            const key = String(agent.id);
-            const agentClients = agentConnections.get(key);
-            if (agentClients && agentClients.size > 0) {
-              agentClients.forEach((ws) => {
-                if (ws.readyState === 1) { // OPEN
+          // Attempt targeted broadcast to matched agents first
+          if (agents && agents.length > 0) {
+            agents.forEach((agent) => {
+              const key = String(agent.id);
+              const agentClients = agentConnections.get(key);
+              if (agentClients && agentClients.size > 0) {
+                agentClients.forEach((ws) => {
+                  if (ws.readyState === 1) { // OPEN
+                    ws.send(JSON.stringify(orderBroadcast));
+                    broadcastCount++;
+                  }
+                });
+                console.log(`📲 Broadcast order ${orderId} to agent ${agent.id}`);
+              }
+            });
+          }
+
+          // If no targeted client received it (e.g. key mismatch or guest testing), broadcast to ALL active WebSocket connections
+          if (broadcastCount === 0 && agentConnections.size > 0) {
+            console.log(`📲 Fallback broadcast order ${orderId} to ALL connected agent sockets (${agentConnections.size} keys)`);
+            agentConnections.forEach((clients, key) => {
+              clients.forEach((ws) => {
+                if (ws.readyState === 1) {
                   ws.send(JSON.stringify(orderBroadcast));
+                  broadcastCount++;
                 }
               });
-              console.log(`📲 Broadcast order ${orderId} to agent ${agent.id}`);
-            }
-          });
+            });
+          }
         } catch (error) {
           console.error('Error processing restaurant.accepted:', error && error.message);
           if (error && error.stack) console.error(error.stack);
